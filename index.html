@@ -215,7 +215,7 @@
   <div class="upload-zone" id="uploadZone">
     <div>📷 Fotos hier ablegen oder tippen zum Auswählen</div>
     <div style="font-size:12px; margin-top:6px; color:#555;">JPG, HEIC, PNG — mehrere Dateien möglich</div>
-    <input type="file" id="fileInput" accept="image/*" multiple capture="environment">
+    <input type="file" id="fileInput" accept="image/*" multiple>
   </div>
 
   <div class="status-line" id="uploadStatus"></div>
@@ -264,7 +264,14 @@ function ladeProjekte() {
       "Authorization": "Bearer " + SUPABASE_ANON_KEY
     }
   })
-  .then(function(res) { return res.json(); })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("HTTP " + res.status + ": " + errText);
+      });
+    }
+    return res.json();
+  })
   .then(function(data) {
     select.innerHTML = '<option value="">-- bitte wählen --</option>';
     if (data && data.length) {
@@ -275,12 +282,12 @@ function ladeProjekte() {
         select.appendChild(opt);
       }
     } else {
-      select.innerHTML = '<option value="">-- keine Projekte gefunden --</option>';
+      select.innerHTML = '<option value="">-- keine Projekte gefunden (Tabelle leer?) --</option>';
     }
   })
   .catch(function(err) {
     console.error("Fehler beim Laden der Projekte:", err);
-    select.innerHTML = '<option value="">-- Fehler beim Laden, bitte Seite neu laden --</option>';
+    select.innerHTML = '<option value="">-- Fehler: ' + err.message.substring(0, 80) + ' --</option>';
   });
 }
 
