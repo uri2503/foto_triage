@@ -1151,15 +1151,6 @@ function zeigeArchivDownloadLink(zipPath) {
 // Bucket und legt Zeilen in chapters/images an (Riedel Classic Doku).
 // ============================================================
 
-function zufallsString(length) {
-  var chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  var result = "";
-  for (var i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
 // Findet das passende Chapter (Projekt + Arbeitsschritt-Name) oder legt
 // eines neu an, falls für diesen Arbeitsschritt noch keins existiert.
 function findeOderErstelleChapter(projectId, arbeitsschritt) {
@@ -1173,7 +1164,7 @@ function findeOderErstelleChapter(projectId, arbeitsschritt) {
   .then(function(rows) {
     if (rows && rows.length > 0) return rows[0];
 
-    return naechstePosition("chapters", "project_id", projectId).then(function(pos) {
+    return zaehleZeilen("chapters", "project_id", projectId).then(function(pos) {
       return fetch(SUPABASE_URL + "/rest/v1/chapters", {
         method: "POST",
         headers: {
@@ -1185,8 +1176,7 @@ function findeOderErstelleChapter(projectId, arbeitsschritt) {
         body: JSON.stringify({
           project_id: projectId,
           name: arbeitsschritt,
-          position: pos,
-          description: null
+          position: pos
         })
       })
       .then(function(res) {
@@ -1202,73 +1192,98 @@ function findeOderErstelleChapter(projectId, arbeitsschritt) {
   });
 }
 
-// Ermittelt die nächste freie 'position' (max+1) für chapters oder images
-function naechstePosition(table, filterColumn, filterValue) {
-  var url = SUPABASE_URL + "/rest/v1/" + table + "?" + filterColumn + "=eq." + filterValue +
-    "&select=position&order=position.desc&limit=1";
+// Ermittelt die nächste freie 'position' für chapters/images – per
+// Zählung der bestehenden Zeilen, exakt wie die Riedel Classic Doku
+// App selbst es macht (chapters.length / images.filter(...).length).
+function zaehleZeilen(table, filterColumn, filterValue) {
+  var url = SUPABASE_URL + "/rest/v1/" + table + "?" + filterColumn + "=eq." + filterValue + "&select=id";
   return fetch(url, {
     headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }
   })
   .then(function(res) { return res.json(); })
-  .then(function(rows) { return (rows && rows.length) ? rows[0].position + 1 : 0; });
+  .then(function(rows) { return rows ? rows.length : 0; });
 }
 
-// Kopiert ein einzelnes bestätigtes Foto vom Triage-Bucket in den
-// Doku-Bucket und legt die zugehörige images-Zeile an.
-function kopiereFotoInDoku(item, chapterId, position) {
-  var extMatch = item.file.name.split(".");
-  var ext = extMatch.length > 1 ? extMatch[extMatch.length - 1].toLowerCase() : "jpg";
-  var destKey = currentProjectId + "/" + chapterId + "/" + Date.now() + "_" + zufallsString(8) + "." + ext;
+// Komprimiert ein Foto wie die Riedel Classic Doku App selbst (Canvas-
+// Resize auf maxW, JPEG-Export) – ohne CI-Wasserzeichen, da dieses in
+// der App nur eine Session-Eingabe ist und nirgends gespeichert wird.
+function komprimiereFuerDoku(file, maxW, quality) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    var url = URL.createObjectURL(file);
+    img.onload = function() {
+      URL.revokeObjectURL(url);
+      var w = img.width, h = img.height;
+      if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+      var canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(function(blob) { resolve(blob); }, "image/jpeg", quality);
+    };
+    img.onerror = function() {
+      URL.revokeObjectURL(url);
+      reject(new Error("Konnte Bild nicht laden: " + file.name));
+    };
+    img.src = url;
+  });
+}
 
-  return fetch(SUPABASE_URL + "/storage/v1/object/copy", {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      bucketId: "foto-triage-raw",
-      sourceKey: item.storagePath,
-      destinationBucket: "restauration",
-      destinationKey: destKey
-    })
-  })
-  .then(function(res) {
-    if (!res.ok) {
-      return res.text().then(function(errText) {
-        throw new Error("Doku-Kopie " + item.file.name + " – HTTP " + res.status + ": " + errText);
-      });
-    }
-    return fetch(SUPABASE_URL + "/rest/v1/images", {
+// Lädt ein bestätigtes Foto komprimiert in den Doku-Bucket 'restauration'
+// hoch und legt die zugehörige images-Zeile an. Pfad-Format und
+// Kompressionswerte (maxW 2400, Qualität 78%) entsprechen exakt der
+// echten Riedel Classic Doku App.
+function kopiereFotoInDoku(item, chapterId, position) {
+  return komprimiereFuerDoku(item.file, 2400, 0.78).then(function(compressed) {
+    var destKey = currentProjectId + "/" + chapterId + "/" + Date.now() + "_" +
+      Math.random().toString(36).slice(2) + ".jpg";
+
+    return fetch(SUPABASE_URL + "/storage/v1/object/restauration/" + destKey, {
       method: "POST",
       headers: {
         "apikey": SUPABASE_ANON_KEY,
         "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
+        "Content-Type": "image/jpeg"
       },
-      body: JSON.stringify({
-        chapter_id: chapterId,
-        position: position,
-        storage_path: destKey,
-        caption: null
-      })
-    });
-  })
-  .then(function(res) {
-    if (!res.ok) {
-      return res.text().then(function(errText) {
-        throw new Error("images-Eintrag " + item.file.name + " – HTTP " + res.status + ": " + errText);
+      body: compressed
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(errText) {
+          throw new Error("Doku-Upload " + item.file.name + " – HTTP " + res.status + ": " + errText);
+        });
+      }
+      return fetch(SUPABASE_URL + "/rest/v1/images", {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        body: JSON.stringify({
+          chapter_id: chapterId,
+          position: position,
+          storage_path: destKey,
+          caption: ""
+        })
       });
-    }
-    return res.json();
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(errText) {
+          throw new Error("images-Eintrag " + item.file.name + " – HTTP " + res.status + ": " + errText);
+        });
+      }
+      return res.json();
+    });
   });
 }
 
 // Übernimmt alle bestätigten Fotos in das gefundene/neue Chapter
 function uebernehmeFotosInDoku(chapter, bestaetigteFotos) {
-  return naechstePosition("images", "chapter_id", chapter.id).then(function(startPos) {
+  return zaehleZeilen("images", "chapter_id", chapter.id).then(function(startPos) {
     var promises = [];
     for (var i = 0; i < bestaetigteFotos.length; i++) {
       promises.push(kopiereFotoInDoku(bestaetigteFotos[i], chapter.id, startPos + i));
