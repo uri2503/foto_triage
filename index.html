@@ -258,7 +258,7 @@ var currentBatchId = null;   // ID des aktuellen foto_triage_batches-Eintrags
 function ladeProjekte() {
   var select = document.getElementById("projektSelect");
 
-  fetch(SUPABASE_URL + "/rest/v1/projects?select=id,name&order=name.asc", {
+  fetch(SUPABASE_URL + "/rest/v1/projects?select=id,vehicle,customer&order=vehicle.asc", {
     headers: {
       "apikey": SUPABASE_ANON_KEY,
       "Authorization": "Bearer " + SUPABASE_ANON_KEY
@@ -278,7 +278,9 @@ function ladeProjekte() {
       for (var i = 0; i < data.length; i++) {
         var opt = document.createElement("option");
         opt.value = data[i].id;
-        opt.textContent = data[i].name;
+        var label = data[i].vehicle || "(ohne Bezeichnung)";
+        if (data[i].customer) label += " – " + data[i].customer;
+        opt.textContent = label;
         select.appendChild(opt);
       }
     } else {
