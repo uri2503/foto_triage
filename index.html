@@ -149,6 +149,26 @@
   }
   .status-line strong { color: #c0392b; }
 
+  .progress-bar-container {
+    margin-top: 14px;
+    height: 8px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: #c0392b;
+    width: 0%;
+    transition: width 0.2s ease;
+  }
+  .progress-text {
+    font-size: 13px;
+    color: #888;
+    margin-top: 6px;
+  }
+  .progress-text.success { color: #4caf50; }
+
   .step-header {
     display: flex;
     justify-content: space-between;
@@ -219,6 +239,10 @@
   </div>
 
   <div class="status-line" id="uploadStatus"></div>
+  <div class="progress-bar-container hidden" id="progressBarContainer">
+    <div class="progress-bar-fill" id="progressBarFill"></div>
+  </div>
+  <div class="progress-text hidden" id="progressText"></div>
   <button class="btn" id="triageBtn" disabled>KI-Triage starten</button>
 </div>
 
@@ -457,13 +481,37 @@ function erstelleBatch(projektId, projektName, arbeitsschritt) {
 }
 
 // Lädt alle Rohfotos in den Storage-Bucket und legt je Foto eine Zeile in
-// foto_triage_photos an (storage_path, dateiname_original).
+// foto_triage_photos an (storage_path, dateiname_original). Aktualisiert
+// dabei den Fortschrittsbalken live.
 function ladeRohfotosHoch(batchId) {
+  var total = photoResults.length;
+  var completed = 0;
+
+  var progressContainer = document.getElementById("progressBarContainer");
+  var progressFill = document.getElementById("progressBarFill");
+  var progressText = document.getElementById("progressText");
+
+  progressContainer.classList.remove("hidden");
+  progressText.classList.remove("hidden", "success");
+  progressFill.style.width = "0%";
+  progressText.textContent = "0 von " + total + " Rohfotos hochgeladen";
+
   var promises = [];
   for (var i = 0; i < photoResults.length; i++) {
-    promises.push(uploadEinzelnesFoto(photoResults[i], batchId, i));
+    promises.push(
+      uploadEinzelnesFoto(photoResults[i], batchId, i).then(function() {
+        completed++;
+        var pct = Math.round((completed / total) * 100);
+        progressFill.style.width = pct + "%";
+        progressText.textContent = completed + " von " + total + " Rohfotos hochgeladen";
+      })
+    );
   }
-  return Promise.all(promises);
+
+  return Promise.all(promises).then(function() {
+    progressText.textContent = "✓ Alle " + total + " Rohfotos erfolgreich hochgeladen";
+    progressText.classList.add("success");
+  });
 }
 
 function uploadEinzelnesFoto(item, batchId, index) {
@@ -739,6 +787,8 @@ document.getElementById("resetBtn").addEventListener("click", function() {
   currentBatchId = null;
   fileInput.value = "";
   document.getElementById("resultCard").classList.add("hidden");
+  document.getElementById("progressBarContainer").classList.add("hidden");
+  document.getElementById("progressText").classList.add("hidden");
   updateUploadStatus();
   window.scrollTo({top: 0, behavior: "smooth"});
 });
