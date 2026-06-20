@@ -604,28 +604,71 @@ function speichereScoresInDB() {
   return Promise.all(promises);
 }
 
-// Liest alle Dateien als Base64 (ohne Data-URL-Prefix) für die API
-function alleAlsBase64(items) {
-  var promises = [];
-  for (var i = 0; i < items.length; i++) {
-    promises.push(dateiAlsBase64(items[i]));
-  }
-  return Promise.all(promises);
+// Skaliert ein Foto client-seitig herunter (für die KI-Analyse, NICHT für
+// das Storage-Archiv – dort bleibt die Originalqualität erhalten) und
+// gibt es als Base64-JPEG zurück. Reduziert die Anfragegröße drastisch,
+// damit auch größere Serien (20-40 Fotos) in einem KI-Call passen.
+function resizeBildAlsBase64(item, maxDim, quality) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    var url = URL.createObjectURL(item.file);
+
+    img.onload = function() {
+      var width = img.width;
+      var height = img.height;
+      var scale = Math.min(1, maxDim / Math.max(width, height));
+      var targetWidth = Math.max(1, Math.round(width * scale));
+      var targetHeight = Math.max(1, Math.round(height * scale));
+
+      var canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+      var dataUrl = canvas.toDataURL("image/jpeg", quality);
+      var base64 = dataUrl.split(",")[1];
+
+      URL.revokeObjectURL(url);
+      resolve({ id: item.id, base64: base64, media_type: "image/jpeg" });
+    };
+    img.onerror = function() {
+      URL.revokeObjectURL(url);
+      reject(new Error("Konnte Bild nicht laden: " + item.file.name));
+    };
+    img.src = url;
+  });
 }
 
-function dateiAlsBase64(item) {
-  return new Promise(function(resolve, reject) {
-    var reader = new FileReader();
-    reader.onload = function() {
-      var base64 = reader.result.split(",")[1];
-      resolve({
-        id: item.id,
-        base64: base64,
-        media_type: item.file.type || "image/jpeg"
-      });
-    };
-    reader.onerror = function() { reject(new Error("Lesefehler bei " + item.file.name)); };
-    reader.readAsDataURL(item.file);
+// Bereitet alle Fotos für die KI vor (verkleinert + Base64), mit eigenem
+// Fortschrittsschritt im selben Balken wie der Storage-Upload.
+function alleAlsBase64(items) {
+  var total = items.length;
+  var completed = 0;
+
+  var progressFill = document.getElementById("progressBarFill");
+  var progressText = document.getElementById("progressText");
+  progressFill.style.width = "0%";
+  progressText.classList.remove("success");
+  progressText.textContent = "Bereite 0 von " + total + " Bildern für KI-Analyse vor";
+
+  var promises = [];
+  for (var i = 0; i < items.length; i++) {
+    promises.push(
+      resizeBildAlsBase64(items[i], 1024, 0.7).then(function(result) {
+        completed++;
+        var pct = Math.round((completed / total) * 100);
+        progressFill.style.width = pct + "%";
+        progressText.textContent = "Bereite " + completed + " von " + total + " Bildern für KI-Analyse vor";
+        return result;
+      })
+    );
+  }
+
+  return Promise.all(promises).then(function(results) {
+    progressText.textContent = "✓ Bilder für KI-Analyse vorbereitet";
+    progressText.classList.add("success");
+    return results;
   });
 }
 
