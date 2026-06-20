@@ -307,8 +307,12 @@
     <button class="btn" id="confirmBtn">Auswahl übernehmen →</button>
     <button class="btn btn-secondary" id="resetBtn">Neu starten</button>
   </div>
+  <div class="status-line hidden" id="archivLinkContainer">
+    📦 <a href="#" id="archivDownloadLink" target="_blank" style="color: #c0392b;">Archiv-ZIP herunterladen</a>
+  </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 
 // ============================================================
@@ -1051,6 +1055,98 @@ function zeigeErgebnis() {
 }
 
 // ============================================================
+// ============================================================
+// ZIP-Archiv: packt die abgelehnten Rohfotos (bereits im Browser
+// vorhanden, kein erneuter Download nötig) und lädt sie als ein ZIP
+// in den 'foto-triage-archiv'-Bucket hoch.
+// ============================================================
+function erstelleUndLadeZipHoch(batchId, abgelehnteFotos) {
+  var progressFill = document.getElementById("progressBarFill");
+  var progressText = document.getElementById("progressText");
+  progressFill.classList.add("indeterminate");
+  progressText.classList.remove("success");
+  progressText.textContent = "Erstelle Archiv-ZIP (" + abgelehnteFotos.length + " Fotos)...";
+
+  var zip = new JSZip();
+  for (var i = 0; i < abgelehnteFotos.length; i++) {
+    zip.file(abgelehnteFotos[i].file.name, abgelehnteFotos[i].file);
+  }
+
+  return zip.generateAsync({ type: "blob" }).then(function(blob) {
+    var zipPath = batchId + "/archiv_" + Date.now() + ".zip";
+
+    return fetch(SUPABASE_URL + "/storage/v1/object/foto-triage-archiv/" + zipPath, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+        "Content-Type": "application/zip"
+      },
+      body: blob
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(errText) {
+          throw new Error("ZIP-Upload – HTTP " + res.status + ": " + errText);
+        });
+      }
+      return fetch(SUPABASE_URL + "/rest/v1/foto_triage_archive", {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        body: JSON.stringify({
+          batch_id: batchId,
+          storage_path: zipPath,
+          foto_anzahl: abgelehnteFotos.length
+        })
+      });
+    })
+    .then(function(res) {
+      if (!res.ok) {
+        return res.text().then(function(errText) {
+          throw new Error("Archiv-Eintrag – HTTP " + res.status + ": " + errText);
+        });
+      }
+      return res.json();
+    })
+    .then(function() {
+      progressFill.classList.remove("indeterminate");
+      progressFill.style.width = "100%";
+      progressText.textContent = "✓ Archiv-ZIP erstellt (" + abgelehnteFotos.length + " Fotos)";
+      progressText.classList.add("success");
+      return zeigeArchivDownloadLink(zipPath);
+    });
+  });
+}
+
+// Erzeugt eine zeitlich befristete Download-URL fürs Archiv und zeigt sie an
+function zeigeArchivDownloadLink(zipPath) {
+  return fetch(SUPABASE_URL + "/storage/v1/object/sign/foto-triage-archiv/" + zipPath, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ expiresIn: 3600 })
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data && data.signedURL) {
+      var link = document.getElementById("archivDownloadLink");
+      link.href = SUPABASE_URL + "/storage/v1" + data.signedURL;
+      document.getElementById("archivLinkContainer").classList.remove("hidden");
+    }
+  })
+  .catch(function(err) {
+    console.error("Konnte Download-Link nicht erzeugen:", err);
+  });
+}
+
 // Doku-Übernahme: kopiert bestätigte Fotos in den 'restauration'-
 // Bucket und legt Zeilen in chapters/images an (Riedel Classic Doku).
 // ============================================================
@@ -1192,6 +1288,7 @@ document.getElementById("confirmBtn").addEventListener("click", function() {
   var promises = [];
   var bestaetigtCount = 0;
   var bestaetigteFotos = [];
+  var abgelehnteFotos = [];
 
   for (var i = 0; i < photoResults.length; i++) {
     var item = photoResults[i];
@@ -1200,6 +1297,8 @@ document.getElementById("confirmBtn").addEventListener("click", function() {
     if (item.selected) {
       bestaetigtCount++;
       bestaetigteFotos.push(item);
+    } else {
+      abgelehnteFotos.push(item);
     }
 
     promises.push(
@@ -1239,12 +1338,17 @@ document.getElementById("confirmBtn").addEventListener("click", function() {
         });
     })
     .then(function() {
+      if (abgelehnteFotos.length === 0) return null;
+      confirmBtn.textContent = "Erstelle Archiv-ZIP...";
+      return erstelleUndLadeZipHoch(currentBatchId, abgelehnteFotos);
+    })
+    .then(function() {
       confirmBtn.disabled = false;
       confirmBtn.textContent = "Auswahl übernehmen →";
       alert(
         "✓ " + bestaetigtCount + " Bild(er) in die Riedel Classic Doku übernommen.\n" +
-        (photoResults.length - bestaetigtCount) + " Bild(er) bleiben im Triage-Archiv.\n\n" +
-        "Das ZIP-Archiv für abgelehnte Bilder folgt als nächster Schritt."
+        (photoResults.length - bestaetigtCount) + " Bild(er) als ZIP archiviert.\n\n" +
+        "Der Download-Link zum Archiv steht jetzt unter der Bildauswahl."
       );
     })
     .catch(function(err) {
@@ -1266,6 +1370,7 @@ document.getElementById("resetBtn").addEventListener("click", function() {
   document.getElementById("resultCard").classList.add("hidden");
   document.getElementById("progressBarContainer").classList.add("hidden");
   document.getElementById("progressText").classList.add("hidden");
+  document.getElementById("archivLinkContainer").classList.add("hidden");
   updateUploadStatus();
   window.scrollTo({top: 0, behavior: "smooth"});
 });
