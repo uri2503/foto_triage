@@ -480,7 +480,11 @@ function uploadEinzelnesFoto(item, batchId, index) {
     body: item.file
   })
   .then(function(res) {
-    if (!res.ok) throw new Error("Storage-Upload fehlgeschlagen: " + item.file.name);
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("Storage-Upload " + item.file.name + " – HTTP " + res.status + ": " + errText);
+      });
+    }
     item.storagePath = path;
     return fetch(SUPABASE_URL + "/rest/v1/foto_triage_photos", {
       method: "POST",
@@ -498,7 +502,11 @@ function uploadEinzelnesFoto(item, batchId, index) {
     });
   })
   .then(function(res) {
-    if (!res.ok) throw new Error("Foto-Eintrag konnte nicht angelegt werden: " + item.file.name);
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("Foto-Eintrag " + item.file.name + " – HTTP " + res.status + ": " + errText);
+      });
+    }
     return res.json();
   })
   .then(function(rows) {
