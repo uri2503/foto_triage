@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Foto-Triage | Riedel Classics</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d0d0d;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 22px;
+    border-bottom: 2px solid #c0392b;
+    padding-bottom: 12px;
+    margin-bottom: 24px;
+  }
+  h1 span { color: #c0392b; }
+  .card {
+    background: #161616;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 6px;
+    margin-top: 14px;
+  }
+  label:first-child { margin-top: 0; }
+  select, input[type="text"] {
+    width: 100%;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    color: #eee;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 15px;
+  }
+  select:focus, input:focus { outline: none; border-color: #c0392b; }
+
+  .upload-zone {
+    margin-top: 14px;
+    border: 2px dashed #333;
+    border-radius: 8px;
+    padding: 30px 20px;
+    text-align: center;
+    color: #777;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: #c0392b;
+    color: #ccc;
+  }
+  .upload-zone input { display: none; }
+
+  .btn {
+    background: #c0392b;
+    color: #fff;
+    border: none;
+    padding: 12px 22px;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 16px;
+  }
+  .btn:disabled { background: #444; cursor: not-allowed; }
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid #444;
+    color: #ccc;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .photo-tile {
+    position: relative;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 2px solid #2a2a2a;
+    aspect-ratio: 1 / 1;
+    cursor: pointer;
+  }
+  .photo-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo-tile.vorschlag { border-color: #c0392b; }
+  .photo-tile .badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: #c0392b;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: none;
+  }
+  .photo-tile.vorschlag .badge { display: block; }
+  .photo-tile .check {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.6);
+    border: 2px solid #888;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: transparent;
+  }
+  .photo-tile.selected .check {
+    background: #c0392b;
+    border-color: #c0392b;
+    color: #fff;
+  }
+  .photo-tile .filename {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.85));
+    font-size: 9px;
+    color: #ccc;
+    padding: 14px 6px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .status-line {
+    font-size: 13px;
+    color: #888;
+    margin-top: 14px;
+  }
+  .status-line strong { color: #c0392b; }
+
+  .step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .step-header h2 { font-size: 16px; color: #ccc; }
+  .step-number {
+    display: inline-block;
+    background: #c0392b;
+    color: #fff;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 22px;
+    font-size: 12px;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+  .hidden { display: none; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<h1>RC <span>Foto-Triage</span></h1>
+
+<!-- SCHRITT 1: Projekt & Arbeitsschritt -->
+<div class="card">
+  <div class="step-header"><h2><span class="step-number">1</span>Projekt &amp; Arbeitsschritt wählen</h2></div>
+
+  <label for="projektSelect">Projekt</label>
+  <select id="projektSelect">
+    <option value="">-- Projekt wird geladen --</option>
+  </select>
+
+  <label for="arbeitsschrittSelect">Arbeitsschritt</label>
+  <select id="arbeitsschrittSelect">
+    <option value="">-- bitte wählen --</option>
+    <option value="00 - Eingang/Zustandsaufnahme">00 - Eingang/Zustandsaufnahme</option>
+    <option value="01 - Demontage">01 - Demontage</option>
+    <option value="02 - Befundung">02 - Befundung</option>
+    <option value="03 - Karosserie Vorbereitung">03 - Karosserie Vorbereitung</option>
+    <option value="04 - Karosserie Demontage">04 - Karosserie Demontage</option>
+    <option value="05 - Karosserie Instandsetzung">05 - Karosserie Instandsetzung</option>
+    <option value="06 - Lackierung Vorbereitung">06 - Lackierung Vorbereitung</option>
+    <option value="07 - Lackierung">07 - Lackierung</option>
+    <option value="08 - Technik/Motor">08 - Technik/Motor</option>
+    <option value="09 - Fahrwerk">09 - Fahrwerk</option>
+    <option value="10 - Elektrik">10 - Elektrik</option>
+    <option value="11 - Innenraum">11 - Innenraum</option>
+    <option value="12 - Montage">12 - Montage</option>
+    <option value="13 - Feinabstimmung">13 - Feinabstimmung</option>
+    <option value="14 - Endkontrolle">14 - Endkontrolle</option>
+    <option value="15 - Übergabe">15 - Übergabe</option>
+  </select>
+</div>
+
+<!-- SCHRITT 2: Upload -->
+<div class="card" id="uploadCard">
+  <div class="step-header"><h2><span class="step-number">2</span>Rohfotos hochladen</h2></div>
+
+  <div class="upload-zone" id="uploadZone">
+    <div>📷 Fotos hier ablegen oder tippen zum Auswählen</div>
+    <div style="font-size:12px; margin-top:6px; color:#555;">JPG, HEIC, PNG — mehrere Dateien möglich</div>
+    <input type="file" id="fileInput" accept="image/*" multiple capture="environment">
+  </div>
+
+  <div class="status-line" id="uploadStatus"></div>
+  <button class="btn" id="triageBtn" disabled>KI-Triage starten</button>
+</div>
+
+<!-- SCHRITT 3: Triage-Ergebnis -->
+<div class="card hidden" id="resultCard">
+  <div class="step-header"><h2><span class="step-number">3</span>Auswahl bestätigen</h2></div>
+  <div class="status-line">
+    KI schlägt <strong id="vorschlagCount">0</strong> von <strong id="totalCount">0</strong> Bildern vor.
+    Tippe auf ein Bild, um die Auswahl zu ändern.
+  </div>
+  <div class="grid" id="photoGrid"></div>
+
+  <div class="actions">
+    <button class="btn" id="confirmBtn">Auswahl übernehmen →</button>
+    <button class="btn btn-secondary" id="resetBtn">Neu starten</button>
+  </div>
+</div>
+
+<script>
+
+// ============================================================
+// Konfiguration
+// ============================================================
+var SUPABASE_URL = "https://ysqzdqazcgyuzdorauiq.supabase.co";
+var SUPABASE_ANON_KEY = "sb_publishable_HIER_EINFUEGEN"; // TODO: echten Key eintragen
+
+// ============================================================
+// State
+// ============================================================
+var selectedFiles = [];      // Array von File-Objekten
+var photoResults = [];       // Array von {file, url, score, vorschlag, selected}
+var currentBatchId = null;   // ID des aktuellen foto_triage_batches-Eintrags
+
+// ============================================================
+// Projekte laden (aus bestehender 'projects' Tabelle)
+// ============================================================
+function ladeProjekte() {
+  var select = document.getElementById("projektSelect");
+
+  fetch(SUPABASE_URL + "/rest/v1/projects?select=id,name&order=name.asc", {
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY
+    }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    select.innerHTML = '<option value="">-- bitte wählen --</option>';
+    if (data && data.length) {
+      for (var i = 0; i < data.length; i++) {
+        var opt = document.createElement("option");
+        opt.value = data[i].id;
+        opt.textContent = data[i].name;
+        select.appendChild(opt);
+      }
+    } else {
+      select.innerHTML = '<option value="">-- keine Projekte gefunden --</option>';
+    }
+  })
+  .catch(function(err) {
+    console.error("Fehler beim Laden der Projekte:", err);
+    select.innerHTML = '<option value="">-- Fehler beim Laden, bitte Seite neu laden --</option>';
+  });
+}
+
+// ============================================================
+// Upload-Zone Interaktion
+// ============================================================
+var uploadZone = document.getElementById("uploadZone");
+var fileInput = document.getElementById("fileInput");
+var uploadStatus = document.getElementById("uploadStatus");
+var triageBtn = document.getElementById("triageBtn");
+
+uploadZone.addEventListener("click", function() {
+  fileInput.click();
+});
+
+uploadZone.addEventListener("dragover", function(e) {
+  e.preventDefault();
+  uploadZone.classList.add("dragover");
+});
+
+uploadZone.addEventListener("dragleave", function() {
+  uploadZone.classList.remove("dragover");
+});
+
+uploadZone.addEventListener("drop", function(e) {
+  e.preventDefault();
+  uploadZone.classList.remove("dragover");
+  handleFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener("change", function() {
+  handleFiles(fileInput.files);
+});
+
+function handleFiles(fileList) {
+  selectedFiles = [];
+  for (var i = 0; i < fileList.length; i++) {
+    selectedFiles.push(fileList[i]);
+  }
+  updateUploadStatus();
+}
+
+function updateUploadStatus() {
+  var projekt = document.getElementById("projektSelect").value;
+  var schritt = document.getElementById("arbeitsschrittSelect").value;
+
+  uploadStatus.innerHTML = selectedFiles.length + " Datei(en) ausgewählt.";
+  document.getElementById("triageBtn").textContent = "KI-Triage starten";
+
+  if (selectedFiles.length > 0 && projekt && schritt) {
+    triageBtn.disabled = false;
+  } else {
+    triageBtn.disabled = true;
+    if (selectedFiles.length > 0 && (!projekt || !schritt)) {
+      uploadStatus.innerHTML += " <strong>Bitte zuerst Projekt und Arbeitsschritt wählen.</strong>";
+    }
+  }
+}
+
+document.getElementById("projektSelect").addEventListener("change", updateUploadStatus);
+document.getElementById("arbeitsschrittSelect").addEventListener("change", updateUploadStatus);
+
+// ============================================================
+// KI-Triage starten (inkl. Batch anlegen, Rohfoto-Upload nach Storage)
+// ============================================================
+triageBtn.addEventListener("click", function() {
+  triageBtn.disabled = true;
+  triageBtn.textContent = "Lade Rohfotos hoch...";
+
+  var projektSelect = document.getElementById("projektSelect");
+  var projektId = projektSelect.value;
+  var projektName = projektSelect.options[projektSelect.selectedIndex].textContent;
+  var arbeitsschritt = document.getElementById("arbeitsschrittSelect").value;
+
+  // Lokale Vorschau-URLs + IDs vorbereiten
+  photoResults = [];
+  for (var i = 0; i < selectedFiles.length; i++) {
+    photoResults.push({
+      id: "foto_" + i,
+      dbId: null,
+      storagePath: null,
+      file: selectedFiles[i],
+      url: URL.createObjectURL(selectedFiles[i]),
+      score: null,
+      schaerfe: null,
+      belichtung: null,
+      perspektive: null,
+      vorschlag: false,
+      duplikat_von: null,
+      selected: false
+    });
+  }
+
+  erstelleBatch(projektId, projektName, arbeitsschritt)
+    .then(function(batch) {
+      currentBatchId = batch.id;
+      return ladeRohfotosHoch(currentBatchId);
+    })
+    .then(function() {
+      triageBtn.textContent = "KI analysiert...";
+      return alleAlsBase64(photoResults);
+    })
+    .then(function(fotosPayload) {
+      return fetch(SUPABASE_URL + "/functions/v1/foto-triage-score", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({
+          arbeitsschritt: arbeitsschritt,
+          fotos: fotosPayload
+        })
+      });
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data.error) {
+        alert("KI-Triage fehlgeschlagen: " + data.error);
+        triageBtn.disabled = false;
+        triageBtn.textContent = "KI-Triage starten";
+        return Promise.reject(new Error("triage-error"));
+      }
+      anwendenScores(data.scores);
+      return speichereScoresInDB();
+    })
+    .then(function() {
+      triageBtn.disabled = false;
+      triageBtn.textContent = "KI-Triage starten";
+      zeigeErgebnis();
+    })
+    .catch(function(err) {
+      if (err && err.message === "triage-error") return; // bereits behandelt
+      console.error("Fehler bei KI-Triage:", err);
+      alert("Etwas ist schiefgelaufen: " + err.message + "\nBitte erneut versuchen.");
+      triageBtn.disabled = false;
+      triageBtn.textContent = "KI-Triage starten";
+    });
+});
+
+// Legt einen neuen Batch-Eintrag an (ein Arbeitsschritt-Upload)
+function erstelleBatch(projektId, projektName, arbeitsschritt) {
+  return fetch(SUPABASE_URL + "/rest/v1/foto_triage_batches", {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation"
+    },
+    body: JSON.stringify({
+      project_id: projektId || null,
+      project_name_snapshot: projektName,
+      arbeitsschritt: arbeitsschritt,
+      status: "hochgeladen",
+      foto_anzahl: selectedFiles.length
+    })
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error("Batch konnte nicht angelegt werden.");
+    return res.json();
+  })
+  .then(function(rows) { return rows[0]; });
+}
+
+// Lädt alle Rohfotos in den Storage-Bucket und legt je Foto eine Zeile in
+// foto_triage_photos an (storage_path, dateiname_original).
+function ladeRohfotosHoch(batchId) {
+  var promises = [];
+  for (var i = 0; i < photoResults.length; i++) {
+    promises.push(uploadEinzelnesFoto(photoResults[i], batchId, i));
+  }
+  return Promise.all(promises);
+}
+
+function uploadEinzelnesFoto(item, batchId, index) {
+  var safeName = index + "_" + item.file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+  var path = batchId + "/" + safeName;
+
+  return fetch(SUPABASE_URL + "/storage/v1/object/foto-triage-raw/" + path, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": item.file.type || "image/jpeg"
+    },
+    body: item.file
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error("Storage-Upload fehlgeschlagen: " + item.file.name);
+    item.storagePath = path;
+    return fetch(SUPABASE_URL + "/rest/v1/foto_triage_photos", {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+      },
+      body: JSON.stringify({
+        batch_id: batchId,
+        storage_path: path,
+        dateiname_original: item.file.name
+      })
+    });
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error("Foto-Eintrag konnte nicht angelegt werden: " + item.file.name);
+    return res.json();
+  })
+  .then(function(rows) {
+    item.dbId = rows[0].id;
+  });
+}
+
+// Schreibt die KI-Scores in foto_triage_photos zurück und setzt den
+// Batch-Status auf 'triagiert'.
+function speichereScoresInDB() {
+  var promises = [];
+  for (var i = 0; i < photoResults.length; i++) {
+    var item = photoResults[i];
+    promises.push(
+      fetch(SUPABASE_URL + "/rest/v1/foto_triage_photos?id=eq." + item.dbId, {
+        method: "PATCH",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ki_score: item.score,
+          ki_score_details: {
+            schaerfe: item.schaerfe,
+            belichtung: item.belichtung,
+            perspektive: item.perspektive
+          },
+          ki_vorschlag: item.vorschlag
+        })
+      })
+    );
+  }
+
+  promises.push(
+    fetch(SUPABASE_URL + "/rest/v1/foto_triage_batches?id=eq." + currentBatchId, {
+      method: "PATCH",
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ status: "triagiert", updated_at: new Date().toISOString() })
+    })
+  );
+
+  return Promise.all(promises);
+}
+
+// Liest alle Dateien als Base64 (ohne Data-URL-Prefix) für die API
+function alleAlsBase64(items) {
+  var promises = [];
+  for (var i = 0; i < items.length; i++) {
+    promises.push(dateiAlsBase64(items[i]));
+  }
+  return Promise.all(promises);
+}
+
+function dateiAlsBase64(item) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      var base64 = reader.result.split(",")[1];
+      resolve({
+        id: item.id,
+        base64: base64,
+        media_type: item.file.type || "image/jpeg"
+      });
+    };
+    reader.onerror = function() { reject(new Error("Lesefehler bei " + item.file.name)); };
+    reader.readAsDataURL(item.file);
+  });
+}
+
+// Verknüpft die KI-Scores mit den lokalen photoResults
+function anwendenScores(scores) {
+  for (var i = 0; i < scores.length; i++) {
+    var s = scores[i];
+    for (var j = 0; j < photoResults.length; j++) {
+      if (photoResults[j].id === s.id) {
+        photoResults[j].schaerfe = s.schaerfe;
+        photoResults[j].belichtung = s.belichtung;
+        photoResults[j].perspektive = s.perspektive;
+        photoResults[j].score = s.score;
+        photoResults[j].vorschlag = !!s.vorschlag;
+        photoResults[j].duplikat_von = s.duplikat_von || null;
+        photoResults[j].selected = !!s.vorschlag;
+        break;
+      }
+    }
+  }
+}
+
+function zeigeErgebnis() {
+  document.getElementById("resultCard").classList.remove("hidden");
+
+  var vorschlagCount = 0;
+  for (var i = 0; i < photoResults.length; i++) {
+    if (photoResults[i].vorschlag) vorschlagCount++;
+  }
+
+  document.getElementById("vorschlagCount").textContent = vorschlagCount;
+  document.getElementById("totalCount").textContent = photoResults.length;
+
+  var grid = document.getElementById("photoGrid");
+  grid.innerHTML = "";
+
+  for (var j = 0; j < photoResults.length; j++) {
+    (function(index) {
+      var item = photoResults[index];
+      var tile = document.createElement("div");
+      tile.className = "photo-tile" + (item.vorschlag ? " vorschlag" : "") + (item.selected ? " selected" : "");
+
+      var img = document.createElement("img");
+      img.src = item.url;
+      tile.appendChild(img);
+
+      var badge = document.createElement("div");
+      badge.className = "badge";
+      badge.textContent = "KI";
+      tile.appendChild(badge);
+
+      if (item.score !== null && item.score !== undefined) {
+        var scoreTag = document.createElement("div");
+        scoreTag.style.position = "absolute";
+        scoreTag.style.top = "6px";
+        scoreTag.style.right = "6px";
+        scoreTag.style.background = "rgba(0,0,0,0.7)";
+        scoreTag.style.color = "#fff";
+        scoreTag.style.fontSize = "10px";
+        scoreTag.style.fontWeight = "700";
+        scoreTag.style.padding = "2px 6px";
+        scoreTag.style.borderRadius = "4px";
+        scoreTag.textContent = item.score + "/10";
+        tile.appendChild(scoreTag);
+      }
+
+      var check = document.createElement("div");
+      check.className = "check";
+      check.textContent = "✓";
+      tile.appendChild(check);
+
+      var fname = document.createElement("div");
+      fname.className = "filename";
+      fname.textContent = item.file.name;
+      tile.appendChild(fname);
+
+      tile.addEventListener("click", function() {
+        photoResults[index].selected = !photoResults[index].selected;
+        tile.classList.toggle("selected");
+      });
+
+      grid.appendChild(tile);
+    })(j);
+  }
+
+  document.getElementById("resultCard").scrollIntoView({behavior: "smooth"});
+}
+
+// ============================================================
+// Auswahl übernehmen: schreibt Nutzerentscheidung je Foto zurück
+// und setzt den Batch-Status auf 'bestaetigt'.
+// ============================================================
+// HINWEIS: Die tatsächliche Übernahme der bestätigten Bilder in die
+// Riedel Classic Doku (chapters/images) sowie das Erzeugen des
+// ZIP-Archivs für abgelehnte Bilder sind separate, spätere Schritte.
+// Hier wird nur die Auswahl-Entscheidung persistiert.
+document.getElementById("confirmBtn").addEventListener("click", function() {
+  var confirmBtn = document.getElementById("confirmBtn");
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = "Speichere...";
+
+  var promises = [];
+  var bestaetigtCount = 0;
+
+  for (var i = 0; i < photoResults.length; i++) {
+    var item = photoResults[i];
+    var entscheidung = item.selected ? "bestaetigt" : "abgelehnt";
+    var ziel = item.selected ? "doku" : "archiv";
+    if (item.selected) bestaetigtCount++;
+
+    promises.push(
+      fetch(SUPABASE_URL + "/rest/v1/foto_triage_photos?id=eq." + item.dbId, {
+        method: "PATCH",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          nutzer_entscheidung: entscheidung,
+          ziel: ziel
+        })
+      })
+    );
+  }
+
+  Promise.all(promises)
+    .then(function() {
+      return fetch(SUPABASE_URL + "/rest/v1/foto_triage_batches?id=eq." + currentBatchId, {
+        method: "PATCH",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ status: "bestaetigt", updated_at: new Date().toISOString() })
+      });
+    })
+    .then(function() {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Auswahl übernehmen →";
+      alert(
+        bestaetigtCount + " Bild(er) sind jetzt für die Doku-Übernahme markiert.\n" +
+        (photoResults.length - bestaetigtCount) + " Bild(er) bleiben im Archiv.\n\n" +
+        "Die automatische Übernahme in Riedel Classic Doku sowie das ZIP-Archiv folgen als nächster Schritt."
+      );
+    })
+    .catch(function(err) {
+      console.error("Fehler beim Speichern der Auswahl:", err);
+      alert("Fehler beim Speichern. Bitte erneut versuchen.");
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Auswahl übernehmen →";
+    });
+});
+
+document.getElementById("resetBtn").addEventListener("click", function() {
+  selectedFiles = [];
+  photoResults = [];
+  currentBatchId = null;
+  fileInput.value = "";
+  document.getElementById("resultCard").classList.add("hidden");
+  updateUploadStatus();
+  window.scrollTo({top: 0, behavior: "smooth"});
+});
+
+// ============================================================
+// Init
+// ============================================================
+ladeProjekte();
+
+</script>
+</body>
+</html>
