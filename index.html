@@ -162,6 +162,15 @@
     width: 0%;
     transition: width 0.2s ease;
   }
+  .progress-bar-fill.indeterminate {
+    width: 35% !important;
+    transition: none;
+    animation: indeterminate-slide 1.1s ease-in-out infinite;
+  }
+  @keyframes indeterminate-slide {
+    0%   { margin-left: -35%; }
+    100% { margin-left: 100%; }
+  }
   .progress-text {
     font-size: 13px;
     color: #888;
@@ -191,11 +200,66 @@
   }
   .hidden { display: none; }
   .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .stammdaten-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #222;
+  }
+  .stammdaten-row:last-child { border-bottom: none; }
+  .stammdaten-code {
+    color: #c0392b;
+    font-weight: 700;
+    font-size: 14px;
+    min-width: 26px;
+  }
+  .stammdaten-name {
+    flex: 1;
+    font-size: 14px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #eee;
+    padding: 6px 8px;
+    border-radius: 4px;
+  }
+  .stammdaten-name:focus {
+    outline: none;
+    border-color: #c0392b;
+    background: #0d0d0d;
+  }
+  .icon-btn {
+    background: #222;
+    border: 1px solid #333;
+    color: #ccc;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .icon-btn.delete { color: #e74c3c; }
 </style>
 </head>
 <body>
 
 <h1>RC <span>Foto-Triage</span></h1>
+
+<button class="btn btn-secondary" id="stammdatenToggle" style="margin-bottom: 20px;">⚙️ Arbeitsschritte verwalten</button>
+
+<div class="card hidden" id="stammdatenCard">
+  <div class="step-header"><h2>Arbeitsschritte (Stammdaten)</h2></div>
+  <div id="stammdatenListe"></div>
+
+  <label for="neuerSchrittInput" style="margin-top: 20px;">Neuer Arbeitsschritt</label>
+  <div style="display: flex; gap: 10px; margin-top: 6px;">
+    <input type="text" id="neuerSchrittInput" placeholder="z.B. Endpolitur">
+    <button class="btn" id="neuerSchrittBtn" style="margin-top: 0; white-space: nowrap;">+ Hinzufügen</button>
+  </div>
+</div>
 
 <!-- SCHRITT 1: Projekt & Arbeitsschritt -->
 <div class="card">
@@ -208,23 +272,7 @@
 
   <label for="arbeitsschrittSelect">Arbeitsschritt</label>
   <select id="arbeitsschrittSelect">
-    <option value="">-- bitte wählen --</option>
-    <option value="00 - Eingang/Zustandsaufnahme">00 - Eingang/Zustandsaufnahme</option>
-    <option value="01 - Demontage">01 - Demontage</option>
-    <option value="02 - Befundung">02 - Befundung</option>
-    <option value="03 - Karosserie Vorbereitung">03 - Karosserie Vorbereitung</option>
-    <option value="04 - Karosserie Demontage">04 - Karosserie Demontage</option>
-    <option value="05 - Karosserie Instandsetzung">05 - Karosserie Instandsetzung</option>
-    <option value="06 - Lackierung Vorbereitung">06 - Lackierung Vorbereitung</option>
-    <option value="07 - Lackierung">07 - Lackierung</option>
-    <option value="08 - Technik/Motor">08 - Technik/Motor</option>
-    <option value="09 - Fahrwerk">09 - Fahrwerk</option>
-    <option value="10 - Elektrik">10 - Elektrik</option>
-    <option value="11 - Innenraum">11 - Innenraum</option>
-    <option value="12 - Montage">12 - Montage</option>
-    <option value="13 - Feinabstimmung">13 - Feinabstimmung</option>
-    <option value="14 - Endkontrolle">14 - Endkontrolle</option>
-    <option value="15 - Übergabe">15 - Übergabe</option>
+    <option value="">-- Arbeitsschritte werden geladen --</option>
   </select>
 </div>
 
@@ -275,6 +323,7 @@ var SUPABASE_ANON_KEY = "sb_publishable_v4kXJa0y-2EHsCFPqBFHfg_QvzKLnt2";
 var selectedFiles = [];      // Array von File-Objekten
 var photoResults = [];       // Array von {file, url, score, vorschlag, selected}
 var currentBatchId = null;   // ID des aktuellen foto_triage_batches-Eintrags
+var currentProjectId = null; // ID des gewählten Projekts (für Doku-Übernahme)
 
 // ============================================================
 // Projekte laden (aus bestehender 'projects' Tabelle)
@@ -318,8 +367,220 @@ function ladeProjekte() {
 }
 
 // ============================================================
-// Upload-Zone Interaktion
+// Arbeitsschritte (Stammdaten): laden, anzeigen, sortieren,
+// umbenennen, hinzufügen, löschen. Ersetzt die fest codierte Liste.
 // ============================================================
+var arbeitsschritteCache = []; // [{id, name, position}], sortiert nach position
+
+function formatiereSchritt(item) {
+  var code = item.position < 10 ? "0" + item.position : "" + item.position;
+  return code + " - " + item.name;
+}
+
+function ladeArbeitsschritte() {
+  return fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten?select=id,name,position&order=position.asc", {
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("HTTP " + res.status + ": " + errText);
+      });
+    }
+    return res.json();
+  })
+  .then(function(data) {
+    arbeitsschritteCache = data || [];
+    fuelleArbeitsschrittDropdown();
+    renderStammdatenListe();
+  })
+  .catch(function(err) {
+    console.error("Fehler beim Laden der Arbeitsschritte:", err);
+    var select = document.getElementById("arbeitsschrittSelect");
+    select.innerHTML = '<option value="">-- Fehler: ' + err.message.substring(0, 80) + ' --</option>';
+  });
+}
+
+function fuelleArbeitsschrittDropdown() {
+  var select = document.getElementById("arbeitsschrittSelect");
+  var vorherigerWert = select.value;
+  select.innerHTML = '<option value="">-- bitte wählen --</option>';
+  for (var i = 0; i < arbeitsschritteCache.length; i++) {
+    var opt = document.createElement("option");
+    var label = formatiereSchritt(arbeitsschritteCache[i]);
+    opt.value = label;
+    opt.textContent = label;
+    select.appendChild(opt);
+  }
+  if (vorherigerWert) select.value = vorherigerWert;
+}
+
+function renderStammdatenListe() {
+  var container = document.getElementById("stammdatenListe");
+  container.innerHTML = "";
+
+  for (var i = 0; i < arbeitsschritteCache.length; i++) {
+    (function(index) {
+      var item = arbeitsschritteCache[index];
+      var row = document.createElement("div");
+      row.className = "stammdaten-row";
+
+      var code = document.createElement("div");
+      code.className = "stammdaten-code";
+      code.textContent = item.position < 10 ? "0" + item.position : "" + item.position;
+      row.appendChild(code);
+
+      var nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.className = "stammdaten-name";
+      nameInput.value = item.name;
+      nameInput.addEventListener("change", function() {
+        umbenennenSchritt(item.id, nameInput.value);
+      });
+      row.appendChild(nameInput);
+
+      var upBtn = document.createElement("button");
+      upBtn.className = "icon-btn";
+      upBtn.textContent = "↑";
+      upBtn.disabled = (index === 0);
+      upBtn.addEventListener("click", function() { verschiebeSchritt(index, -1); });
+      row.appendChild(upBtn);
+
+      var downBtn = document.createElement("button");
+      downBtn.className = "icon-btn";
+      downBtn.textContent = "↓";
+      downBtn.disabled = (index === arbeitsschritteCache.length - 1);
+      downBtn.addEventListener("click", function() { verschiebeSchritt(index, 1); });
+      row.appendChild(downBtn);
+
+      var delBtn = document.createElement("button");
+      delBtn.className = "icon-btn delete";
+      delBtn.textContent = "✕";
+      delBtn.addEventListener("click", function() { loescheSchritt(item.id, item.name); });
+      row.appendChild(delBtn);
+
+      container.appendChild(row);
+    })(i);
+  }
+}
+
+function umbenennenSchritt(id, neuerName) {
+  fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten?id=eq." + id, {
+    method: "PATCH",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ name: neuerName })
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error("Umbenennen fehlgeschlagen");
+    return ladeArbeitsschritte();
+  })
+  .catch(function(err) {
+    alert("Umbenennen fehlgeschlagen: " + err.message);
+  });
+}
+
+// Tauscht die Position von Element [index] mit seinem Nachbarn
+function verschiebeSchritt(index, richtung) {
+  var zielIndex = index + richtung;
+  if (zielIndex < 0 || zielIndex >= arbeitsschritteCache.length) return;
+
+  var a = arbeitsschritteCache[index];
+  var b = arbeitsschritteCache[zielIndex];
+  var posA = a.position;
+  var posB = b.position;
+
+  Promise.all([
+    fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten?id=eq." + a.id, {
+      method: "PATCH",
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ position: posB })
+    }),
+    fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten?id=eq." + b.id, {
+      method: "PATCH",
+      headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ position: posA })
+    })
+  ])
+  .then(function() { return ladeArbeitsschritte(); })
+  .catch(function(err) {
+    alert("Verschieben fehlgeschlagen: " + err.message);
+  });
+}
+
+function loescheSchritt(id, name) {
+  if (!confirm('"' + name + '" wirklich löschen?')) return;
+
+  fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten?id=eq." + id, {
+    method: "DELETE",
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error("Löschen fehlgeschlagen");
+    return resequenziere();
+  })
+  .catch(function(err) {
+    alert("Löschen fehlgeschlagen: " + err.message);
+  });
+}
+
+// Setzt nach Löschen die position-Werte wieder lückenlos auf 0..n-1
+function resequenziere() {
+  return ladeArbeitsschritte().then(function() {
+    var promises = [];
+    for (var i = 0; i < arbeitsschritteCache.length; i++) {
+      if (arbeitsschritteCache[i].position !== i) {
+        promises.push(
+          fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten?id=eq." + arbeitsschritteCache[i].id, {
+            method: "PATCH",
+            headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+            body: JSON.stringify({ position: i })
+          })
+        );
+      }
+    }
+    if (promises.length === 0) return null;
+    return Promise.all(promises).then(function() { return ladeArbeitsschritte(); });
+  });
+}
+
+document.getElementById("stammdatenToggle").addEventListener("click", function() {
+  document.getElementById("stammdatenCard").classList.toggle("hidden");
+});
+
+document.getElementById("neuerSchrittBtn").addEventListener("click", function() {
+  var input = document.getElementById("neuerSchrittInput");
+  var name = input.value.trim();
+  if (!name) return;
+
+  var naechstePos = arbeitsschritteCache.length;
+
+  fetch(SUPABASE_URL + "/rest/v1/arbeitsschritte_stammdaten", {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation"
+    },
+    body: JSON.stringify({ name: name, position: naechstePos })
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("HTTP " + res.status + ": " + errText);
+      });
+    }
+    input.value = "";
+    return ladeArbeitsschritte();
+  })
+  .catch(function(err) {
+    alert("Hinzufügen fehlgeschlagen: " + err.message);
+  });
+});
 var uploadZone = document.getElementById("uploadZone");
 var fileInput = document.getElementById("fileInput");
 var uploadStatus = document.getElementById("uploadStatus");
@@ -363,6 +624,22 @@ function updateUploadStatus() {
   uploadStatus.innerHTML = selectedFiles.length + " Datei(en) ausgewählt.";
   document.getElementById("triageBtn").textContent = "KI-Triage starten";
 
+  var progressContainer = document.getElementById("progressBarContainer");
+  var progressFill = document.getElementById("progressBarFill");
+  var progressText = document.getElementById("progressText");
+
+  if (selectedFiles.length > 0) {
+    progressContainer.classList.remove("hidden");
+    progressText.classList.remove("hidden");
+    progressFill.classList.remove("indeterminate");
+    progressFill.style.width = "100%";
+    progressText.classList.add("success");
+    progressText.textContent = "✓ " + selectedFiles.length + " Datei(en) ausgewählt, bereit zum Hochladen";
+  } else {
+    progressContainer.classList.add("hidden");
+    progressText.classList.add("hidden");
+  }
+
   if (selectedFiles.length > 0 && projekt && schritt) {
     triageBtn.disabled = false;
   } else {
@@ -387,6 +664,7 @@ triageBtn.addEventListener("click", function() {
   var projektId = projektSelect.value;
   var projektName = projektSelect.options[projektSelect.selectedIndex].textContent;
   var arbeitsschritt = document.getElementById("arbeitsschrittSelect").value;
+  currentProjectId = projektId;
 
   // Lokale Vorschau-URLs + IDs vorbereiten
   photoResults = [];
@@ -417,6 +695,12 @@ triageBtn.addEventListener("click", function() {
       return alleAlsBase64(photoResults);
     })
     .then(function(fotosPayload) {
+      var progressFill = document.getElementById("progressBarFill");
+      var progressText = document.getElementById("progressText");
+      progressFill.classList.add("indeterminate");
+      progressText.classList.remove("success");
+      progressText.textContent = "KI analysiert " + fotosPayload.length + " Fotos...";
+
       return fetch(SUPABASE_URL + "/functions/v1/foto-triage-score", {
         method: "POST",
         headers: {
@@ -432,12 +716,21 @@ triageBtn.addEventListener("click", function() {
     })
     .then(function(res) { return res.json(); })
     .then(function(data) {
+      var progressFill = document.getElementById("progressBarFill");
+      var progressText = document.getElementById("progressText");
+      progressFill.classList.remove("indeterminate");
+
       if (data.error) {
+        progressFill.style.width = "0%";
+        progressText.textContent = "✗ KI-Triage fehlgeschlagen";
         alert("KI-Triage fehlgeschlagen: " + data.error);
         triageBtn.disabled = false;
         triageBtn.textContent = "KI-Triage starten";
         return Promise.reject(new Error("triage-error"));
       }
+      progressFill.style.width = "100%";
+      progressText.textContent = "✓ KI-Analyse abgeschlossen";
+      progressText.classList.add("success");
       anwendenScores(data.scores);
       return speichereScoresInDB();
     })
@@ -758,26 +1051,156 @@ function zeigeErgebnis() {
 }
 
 // ============================================================
-// Auswahl übernehmen: schreibt Nutzerentscheidung je Foto zurück
-// und setzt den Batch-Status auf 'bestaetigt'.
+// Doku-Übernahme: kopiert bestätigte Fotos in den 'restauration'-
+// Bucket und legt Zeilen in chapters/images an (Riedel Classic Doku).
 // ============================================================
-// HINWEIS: Die tatsächliche Übernahme der bestätigten Bilder in die
-// Riedel Classic Doku (chapters/images) sowie das Erzeugen des
-// ZIP-Archivs für abgelehnte Bilder sind separate, spätere Schritte.
-// Hier wird nur die Auswahl-Entscheidung persistiert.
+
+function zufallsString(length) {
+  var chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  var result = "";
+  for (var i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Findet das passende Chapter (Projekt + Arbeitsschritt-Name) oder legt
+// eines neu an, falls für diesen Arbeitsschritt noch keins existiert.
+function findeOderErstelleChapter(projectId, arbeitsschritt) {
+  var filterUrl = SUPABASE_URL + "/rest/v1/chapters?project_id=eq." + projectId +
+    "&name=eq." + encodeURIComponent(arbeitsschritt);
+
+  return fetch(filterUrl, {
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(rows) {
+    if (rows && rows.length > 0) return rows[0];
+
+    return naechstePosition("chapters", "project_id", projectId).then(function(pos) {
+      return fetch(SUPABASE_URL + "/rest/v1/chapters", {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        body: JSON.stringify({
+          project_id: projectId,
+          name: arbeitsschritt,
+          position: pos,
+          description: null
+        })
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          return res.text().then(function(errText) {
+            throw new Error("Chapter anlegen – HTTP " + res.status + ": " + errText);
+          });
+        }
+        return res.json();
+      })
+      .then(function(rows2) { return rows2[0]; });
+    });
+  });
+}
+
+// Ermittelt die nächste freie 'position' (max+1) für chapters oder images
+function naechstePosition(table, filterColumn, filterValue) {
+  var url = SUPABASE_URL + "/rest/v1/" + table + "?" + filterColumn + "=eq." + filterValue +
+    "&select=position&order=position.desc&limit=1";
+  return fetch(url, {
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(rows) { return (rows && rows.length) ? rows[0].position + 1 : 0; });
+}
+
+// Kopiert ein einzelnes bestätigtes Foto vom Triage-Bucket in den
+// Doku-Bucket und legt die zugehörige images-Zeile an.
+function kopiereFotoInDoku(item, chapterId, position) {
+  var extMatch = item.file.name.split(".");
+  var ext = extMatch.length > 1 ? extMatch[extMatch.length - 1].toLowerCase() : "jpg";
+  var destKey = currentProjectId + "/" + chapterId + "/" + Date.now() + "_" + zufallsString(8) + "." + ext;
+
+  return fetch(SUPABASE_URL + "/storage/v1/object/copy", {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      bucketId: "foto-triage-raw",
+      sourceKey: item.storagePath,
+      destinationBucket: "restauration",
+      destinationKey: destKey
+    })
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("Doku-Kopie " + item.file.name + " – HTTP " + res.status + ": " + errText);
+      });
+    }
+    return fetch(SUPABASE_URL + "/rest/v1/images", {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+      },
+      body: JSON.stringify({
+        chapter_id: chapterId,
+        position: position,
+        storage_path: destKey,
+        caption: null
+      })
+    });
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("images-Eintrag " + item.file.name + " – HTTP " + res.status + ": " + errText);
+      });
+    }
+    return res.json();
+  });
+}
+
+// Übernimmt alle bestätigten Fotos in das gefundene/neue Chapter
+function uebernehmeFotosInDoku(chapter, bestaetigteFotos) {
+  return naechstePosition("images", "chapter_id", chapter.id).then(function(startPos) {
+    var promises = [];
+    for (var i = 0; i < bestaetigteFotos.length; i++) {
+      promises.push(kopiereFotoInDoku(bestaetigteFotos[i], chapter.id, startPos + i));
+    }
+    return Promise.all(promises);
+  });
+}
+// HINWEIS: Bestätigte Bilder werden in die Riedel Classic Doku übernommen
+// (Bucket 'restauration' + chapters/images). Das ZIP-Archiv für
+// abgelehnte Bilder ist ein separater, späterer Schritt.
 document.getElementById("confirmBtn").addEventListener("click", function() {
   var confirmBtn = document.getElementById("confirmBtn");
   confirmBtn.disabled = true;
   confirmBtn.textContent = "Speichere...";
 
+  var arbeitsschritt = document.getElementById("arbeitsschrittSelect").value;
   var promises = [];
   var bestaetigtCount = 0;
+  var bestaetigteFotos = [];
 
   for (var i = 0; i < photoResults.length; i++) {
     var item = photoResults[i];
     var entscheidung = item.selected ? "bestaetigt" : "abgelehnt";
     var ziel = item.selected ? "doku" : "archiv";
-    if (item.selected) bestaetigtCount++;
+    if (item.selected) {
+      bestaetigtCount++;
+      bestaetigteFotos.push(item);
+    }
 
     promises.push(
       fetch(SUPABASE_URL + "/rest/v1/foto_triage_photos?id=eq." + item.dbId, {
@@ -808,17 +1231,28 @@ document.getElementById("confirmBtn").addEventListener("click", function() {
       });
     })
     .then(function() {
+      if (bestaetigteFotos.length === 0) return null;
+      confirmBtn.textContent = "Übernehme in Doku...";
+      return findeOderErstelleChapter(currentProjectId, arbeitsschritt)
+        .then(function(chapter) {
+          return uebernehmeFotosInDoku(chapter, bestaetigteFotos);
+        });
+    })
+    .then(function() {
       confirmBtn.disabled = false;
       confirmBtn.textContent = "Auswahl übernehmen →";
       alert(
-        bestaetigtCount + " Bild(er) sind jetzt für die Doku-Übernahme markiert.\n" +
-        (photoResults.length - bestaetigtCount) + " Bild(er) bleiben im Archiv.\n\n" +
-        "Die automatische Übernahme in Riedel Classic Doku sowie das ZIP-Archiv folgen als nächster Schritt."
+        "✓ " + bestaetigtCount + " Bild(er) in die Riedel Classic Doku übernommen.\n" +
+        (photoResults.length - bestaetigtCount) + " Bild(er) bleiben im Triage-Archiv.\n\n" +
+        "Das ZIP-Archiv für abgelehnte Bilder folgt als nächster Schritt."
       );
     })
     .catch(function(err) {
-      console.error("Fehler beim Speichern der Auswahl:", err);
-      alert("Fehler beim Speichern. Bitte erneut versuchen.");
+      console.error("Fehler bei Auswahl/Doku-Übernahme:", err);
+      alert(
+        "Die Auswahl wurde gespeichert, aber bei der Doku-Übernahme ist etwas schiefgelaufen:\n\n" +
+        err.message + "\n\nDu kannst es erneut versuchen."
+      );
       confirmBtn.disabled = false;
       confirmBtn.textContent = "Auswahl übernehmen →";
     });
@@ -840,6 +1274,7 @@ document.getElementById("resetBtn").addEventListener("click", function() {
 // Init
 // ============================================================
 ladeProjekte();
+ladeArbeitsschritte();
 
 </script>
 </body>
