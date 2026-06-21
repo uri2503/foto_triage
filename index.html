@@ -242,6 +242,31 @@
   }
   .icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
   .icon-btn.delete { color: #e74c3c; }
+
+  .archiv-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #222;
+  }
+  .archiv-row:last-child { border-bottom: none; }
+  .archiv-row .archiv-info { flex: 1; min-width: 0; }
+  .archiv-row .archiv-titel { font-size: 14px; color: #eee; }
+  .archiv-row .archiv-meta { font-size: 12px; color: #777; margin-top: 2px; }
+  .archiv-row .btn-download {
+    background: #c0392b;
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .archiv-row .btn-download:disabled { background: #444; }
 </style>
 </head>
 <body>
@@ -249,6 +274,7 @@
 <h1>RC <span>Foto-Triage</span></h1>
 
 <button class="btn btn-secondary" id="stammdatenToggle" style="margin-bottom: 20px;">⚙️ Arbeitsschritte verwalten</button>
+<button class="btn btn-secondary" id="archivUebersichtToggle" style="margin-bottom: 20px; margin-left: 10px;">📦 Archiv durchsuchen</button>
 
 <div class="card hidden" id="stammdatenCard">
   <div class="step-header"><h2>Arbeitsschritte (Stammdaten)</h2></div>
@@ -259,6 +285,15 @@
     <input type="text" id="neuerSchrittInput" placeholder="z.B. Endpolitur">
     <button class="btn" id="neuerSchrittBtn" style="margin-top: 0; white-space: nowrap;">+ Hinzufügen</button>
   </div>
+</div>
+
+<div class="card hidden" id="archivUebersichtCard">
+  <div class="step-header">
+    <h2>Archiv-Übersicht</h2>
+    <button class="btn btn-secondary" id="archivUebersichtRefresh" style="margin-top: 0;">🔄 Aktualisieren</button>
+  </div>
+  <div class="status-line" id="archivUebersichtStatus">Lädt...</div>
+  <div id="archivUebersichtListe"></div>
 </div>
 
 <!-- SCHRITT 1: Ziel, Projekt & Arbeitsschritt -->
@@ -606,6 +641,124 @@ function resequenziere() {
 document.getElementById("stammdatenToggle").addEventListener("click", function() {
   document.getElementById("stammdatenCard").classList.toggle("hidden");
 });
+
+// ============================================================
+// Archiv-Übersicht: listet alle bisherigen ZIP-Archive (Triage-Reste
+// und Direkt-Archiv) mit Projekt, Bezeichnung, Datum und Foto-Anzahl.
+// Download-Link wird erst bei Klick frisch erzeugt (kein Ablauf-Problem).
+// ============================================================
+document.getElementById("archivUebersichtToggle").addEventListener("click", function() {
+  var card = document.getElementById("archivUebersichtCard");
+  card.classList.toggle("hidden");
+  if (!card.classList.contains("hidden")) ladeArchivUebersicht();
+});
+document.getElementById("archivUebersichtRefresh").addEventListener("click", ladeArchivUebersicht);
+
+function ladeArchivUebersicht() {
+  var status = document.getElementById("archivUebersichtStatus");
+  var liste = document.getElementById("archivUebersichtListe");
+  status.textContent = "Lädt...";
+  liste.innerHTML = "";
+
+  var url = SUPABASE_URL + "/rest/v1/foto_triage_archive" +
+    "?select=id,storage_path,foto_anzahl,created_at,foto_triage_batches(project_name_snapshot,arbeitsschritt)" +
+    "&order=created_at.desc&limit=100";
+
+  fetch(url, {
+    headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": "Bearer " + SUPABASE_ANON_KEY }
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("HTTP " + res.status + ": " + errText);
+      });
+    }
+    return res.json();
+  })
+  .then(function(rows) {
+    if (!rows || rows.length === 0) {
+      status.textContent = "Noch keine Archive vorhanden.";
+      return;
+    }
+    status.textContent = rows.length + " Archiv(e) (neueste zuerst, max. 100 angezeigt)";
+
+    for (var i = 0; i < rows.length; i++) {
+      (function(row) {
+        var batch = row.foto_triage_batches || {};
+        var projekt = batch.project_name_snapshot || "(unbekanntes Projekt)";
+        var bezeichnung = batch.arbeitsschritt || "";
+        var datum = new Date(row.created_at).toLocaleString("de-DE", {
+          day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+        });
+
+        var rowEl = document.createElement("div");
+        rowEl.className = "archiv-row";
+
+        var info = document.createElement("div");
+        info.className = "archiv-info";
+
+        var titel = document.createElement("div");
+        titel.className = "archiv-titel";
+        titel.textContent = projekt + (bezeichnung ? " – " + bezeichnung : "");
+        info.appendChild(titel);
+
+        var meta = document.createElement("div");
+        meta.className = "archiv-meta";
+        meta.textContent = datum + " · " + row.foto_anzahl + " Foto(s)";
+        info.appendChild(meta);
+
+        rowEl.appendChild(info);
+
+        var btn = document.createElement("button");
+        btn.className = "btn-download";
+        btn.textContent = "Download";
+        btn.addEventListener("click", function() {
+          oeffneArchivDownload(row.storage_path, btn);
+        });
+        rowEl.appendChild(btn);
+
+        liste.appendChild(rowEl);
+      })(rows[i]);
+    }
+  })
+  .catch(function(err) {
+    console.error("Fehler beim Laden der Archiv-Übersicht:", err);
+    status.textContent = "Fehler: " + err.message;
+  });
+}
+
+// Erzeugt bei Klick einen frischen, zeitlich befristeten Download-Link
+// und öffnet ihn direkt in einem neuen Tab.
+function oeffneArchivDownload(zipPath, btn) {
+  var alterText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "...";
+
+  fetch(SUPABASE_URL + "/storage/v1/object/sign/foto-triage-archiv/" + zipPath, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ expiresIn: 3600 })
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    btn.disabled = false;
+    btn.textContent = alterText;
+    if (data && data.signedURL) {
+      window.open(SUPABASE_URL + "/storage/v1" + data.signedURL, "_blank");
+    } else {
+      alert("Konnte keinen Download-Link erzeugen.");
+    }
+  })
+  .catch(function(err) {
+    btn.disabled = false;
+    btn.textContent = alterText;
+    alert("Fehler: " + err.message);
+  });
+}
 
 document.getElementById("neuerSchrittBtn").addEventListener("click", function() {
   var input = document.getElementById("neuerSchrittInput");
