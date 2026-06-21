@@ -261,22 +261,46 @@
   </div>
 </div>
 
-<!-- SCHRITT 1: Projekt & Arbeitsschritt -->
+<!-- SCHRITT 1: Ziel, Projekt & Arbeitsschritt -->
 <div class="card">
-  <div class="step-header"><h2><span class="step-number">1</span>Projekt &amp; Arbeitsschritt wählen</h2></div>
+  <div class="step-header"><h2><span class="step-number">1</span>Ziel, Projekt &amp; Arbeitsschritt</h2></div>
+
+  <label for="zielSelect">Was soll mit den Fotos passieren?</label>
+  <select id="zielSelect">
+    <option value="doku">📁 Restaurations-Doku (mit oder ohne KI)</option>
+    <option value="versicherung">🛡️ Versicherung (Vorher/Nachher, ohne KI)</option>
+    <option value="archiv">📦 Direkt-Archiv (kompletter Altbestand, ohne Auswahl)</option>
+  </select>
 
   <label for="projektSelect">Projekt</label>
   <select id="projektSelect">
     <option value="">-- Projekt wird geladen --</option>
   </select>
 
-  <label for="arbeitsschrittSelect">Arbeitsschritt</label>
-  <select id="arbeitsschrittSelect">
-    <option value="">-- Arbeitsschritte werden geladen --</option>
-  </select>
+  <div id="arbeitsschrittRow" style="margin-top: 14px;">
+    <label for="arbeitsschrittSelect">Arbeitsschritt</label>
+    <select id="arbeitsschrittSelect">
+      <option value="">-- Arbeitsschritte werden geladen --</option>
+    </select>
+  </div>
+
+  <div id="versicherungPhaseRow" class="hidden" style="margin-top: 14px;">
+    <label for="versicherungPhaseSelect">Phase</label>
+    <select id="versicherungPhaseSelect">
+      <option value="Vorher">Vorher</option>
+      <option value="Nachher">Nachher</option>
+      <option value="Sonstige">Sonstige (Text unten eintragen)</option>
+    </select>
+    <input type="text" id="versicherungPhaseFreitext" placeholder="z.B. Zwischenstand" style="margin-top: 8px; display: none;">
+  </div>
+
+  <div id="archivBezeichnungRow" class="hidden" style="margin-top: 14px;">
+    <label for="archivBezeichnung">Bezeichnung (frei wählbar)</label>
+    <input type="text" id="archivBezeichnung" placeholder="z.B. kompletter Altbestand 2019-2021">
+  </div>
 </div>
 
-<!-- SCHRITT 2: Upload -->
+<!-- SCHRITT 2a: Upload (Doku / Versicherung) -->
 <div class="card" id="uploadCard">
   <div class="step-header"><h2><span class="step-number">2</span>Rohfotos hochladen</h2></div>
 
@@ -287,11 +311,39 @@
   </div>
 
   <div class="status-line" id="uploadStatus"></div>
+
+  <label id="skipTriageRow" style="display: flex; align-items: center; gap: 8px; margin-top: 14px; cursor: pointer; font-size: 13px; color: #aaa;">
+    <input type="checkbox" id="skipTriageCheckbox" style="width: auto;">
+    Ohne KI-Triage – ich wähle die Fotos selbst aus (z.B. bei kleinen Lack-Reparaturen)
+  </label>
+
   <div class="progress-bar-container hidden" id="progressBarContainer">
     <div class="progress-bar-fill" id="progressBarFill"></div>
   </div>
   <div class="progress-text hidden" id="progressText"></div>
   <button class="btn" id="triageBtn" disabled>KI-Triage starten</button>
+</div>
+
+<!-- SCHRITT 2b: Direkt-Archiv (eigener, schlanker Ablauf ohne Auswahl) -->
+<div class="card hidden" id="archivUploadCard">
+  <div class="step-header"><h2><span class="step-number">2</span>Fotos für Direkt-Archiv hochladen</h2></div>
+
+  <div class="upload-zone" id="archivUploadZone">
+    <div>📷 Fotos hier ablegen oder tippen zum Auswählen</div>
+    <div style="font-size:12px; margin-top:6px; color:#555;">Kompletter Bestand möglich — wird ungeprüft als ein ZIP archiviert</div>
+    <input type="file" id="archivFileInput" accept="image/*" multiple>
+  </div>
+
+  <div class="status-line" id="archivUploadStatus"></div>
+  <div class="progress-bar-container hidden" id="archivProgressBarContainer">
+    <div class="progress-bar-fill" id="archivProgressBarFill"></div>
+  </div>
+  <div class="progress-text hidden" id="archivProgressText"></div>
+  <button class="btn" id="archivBtn" disabled>📦 Archivieren</button>
+
+  <div class="status-line hidden" id="archivLinkContainer2">
+    📦 <a href="#" id="archivDownloadLink2" target="_blank" style="color: #c0392b;">Archiv-ZIP herunterladen</a>
+  </div>
 </div>
 
 <!-- SCHRITT 3: Triage-Ergebnis -->
@@ -621,12 +673,196 @@ function handleFiles(fileList) {
   updateUploadStatus();
 }
 
-function updateUploadStatus() {
+// ============================================================
+// Direkt-Archiv: eigener, schlanker Ablauf ohne Auswahl/Doku/KI.
+// Nimmt einen kompletten Foto-Bestand entgegen und packt ihn als
+// EIN ZIP direkt ins Archiv – für alte Projekte mit unstrukturiertem
+// Bestand (siehe Konzept Punkt 8.1).
+// ============================================================
+var archivSelectedFiles = [];
+var archivUploadZone = document.getElementById("archivUploadZone");
+var archivFileInput = document.getElementById("archivFileInput");
+var archivUploadStatus = document.getElementById("archivUploadStatus");
+var archivBtn = document.getElementById("archivBtn");
+
+archivUploadZone.addEventListener("click", function() { archivFileInput.click(); });
+archivUploadZone.addEventListener("dragover", function(e) {
+  e.preventDefault();
+  archivUploadZone.classList.add("dragover");
+});
+archivUploadZone.addEventListener("dragleave", function() {
+  archivUploadZone.classList.remove("dragover");
+});
+archivUploadZone.addEventListener("drop", function(e) {
+  e.preventDefault();
+  archivUploadZone.classList.remove("dragover");
+  handleArchivFiles(e.dataTransfer.files);
+});
+archivFileInput.addEventListener("change", function() {
+  handleArchivFiles(archivFileInput.files);
+});
+
+function handleArchivFiles(fileList) {
+  archivSelectedFiles = [];
+  for (var i = 0; i < fileList.length; i++) {
+    archivSelectedFiles.push(fileList[i]);
+  }
+  updateArchivStatus();
+}
+
+function updateArchivStatus() {
   var projekt = document.getElementById("projektSelect").value;
-  var schritt = document.getElementById("arbeitsschrittSelect").value;
+  archivUploadStatus.innerHTML = archivSelectedFiles.length + " Datei(en) ausgewählt.";
+
+  if (archivSelectedFiles.length > 0 && projekt) {
+    archivBtn.disabled = false;
+  } else {
+    archivBtn.disabled = true;
+    if (archivSelectedFiles.length > 0 && !projekt) {
+      archivUploadStatus.innerHTML += " <strong>Bitte zuerst ein Projekt wählen.</strong>";
+    }
+  }
+}
+
+archivBtn.addEventListener("click", function() {
+  archivBtn.disabled = true;
+  archivBtn.textContent = "Lege Batch an...";
+
+  var projektSelect = document.getElementById("projektSelect");
+  var projektId = projektSelect.value;
+  var projektName = projektSelect.options[projektSelect.selectedIndex].textContent;
+  var bezeichnung = document.getElementById("archivBezeichnung").value.trim() || "Altbestand-Archivierung";
+
+  var progressContainer = document.getElementById("archivProgressBarContainer");
+  var progressFill = document.getElementById("archivProgressBarFill");
+  var progressText = document.getElementById("archivProgressText");
+  progressContainer.classList.remove("hidden");
+  progressText.classList.remove("hidden", "success");
+  progressFill.classList.remove("indeterminate");
+  progressFill.style.width = "0%";
+
+  fetch(SUPABASE_URL + "/rest/v1/foto_triage_batches", {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation"
+    },
+    body: JSON.stringify({
+      project_id: projektId || null,
+      project_name_snapshot: projektName,
+      arbeitsschritt: bezeichnung,
+      status: "archiviert",
+      foto_anzahl: archivSelectedFiles.length
+    })
+  })
+  .then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(errText) {
+        throw new Error("Batch anlegen – HTTP " + res.status + ": " + errText);
+      });
+    }
+    return res.json();
+  })
+  .then(function(rows) {
+    var batchId = rows[0].id;
+    archivBtn.textContent = "Packe ZIP (" + archivSelectedFiles.length + " Fotos)...";
+    progressFill.classList.add("indeterminate");
+    progressText.textContent = "Packe " + archivSelectedFiles.length + " Fotos in ein ZIP...";
+
+    var zip = new JSZip();
+    for (var i = 0; i < archivSelectedFiles.length; i++) {
+      zip.file(archivSelectedFiles[i].name, archivSelectedFiles[i]);
+    }
+
+    return zip.generateAsync({ type: "blob" }).then(function(blob) {
+      var zipPath = batchId + "/archiv_" + Date.now() + ".zip";
+      archivBtn.textContent = "Lade ZIP hoch...";
+      progressText.textContent = "Lade Archiv-ZIP hoch...";
+
+      return fetch(SUPABASE_URL + "/storage/v1/object/foto-triage-archiv/" + zipPath, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+          "Content-Type": "application/zip"
+        },
+        body: blob
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          return res.text().then(function(errText) {
+            throw new Error("ZIP-Upload – HTTP " + res.status + ": " + errText);
+          });
+        }
+        return fetch(SUPABASE_URL + "/rest/v1/foto_triage_archive", {
+          method: "POST",
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+          },
+          body: JSON.stringify({
+            batch_id: batchId,
+            storage_path: zipPath,
+            foto_anzahl: archivSelectedFiles.length
+          })
+        });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          return res.text().then(function(errText) {
+            throw new Error("Archiv-Eintrag – HTTP " + res.status + ": " + errText);
+          });
+        }
+        return res.json();
+      })
+      .then(function() {
+        progressFill.classList.remove("indeterminate");
+        progressFill.style.width = "100%";
+        progressText.textContent = "✓ Archiv-ZIP erstellt (" + archivSelectedFiles.length + " Fotos)";
+        progressText.classList.add("success");
+        return zeigeArchivDownloadLink(zipPath, "archivDownloadLink2", "archivLinkContainer2");
+      });
+    });
+  })
+  .then(function() {
+    archivBtn.disabled = false;
+    archivBtn.textContent = "📦 Archivieren";
+    alert("✓ " + archivSelectedFiles.length + " Fotos wurden archiviert. Download-Link steht unten bereit.");
+  })
+  .catch(function(err) {
+    console.error("Fehler beim Direkt-Archivieren:", err);
+    progressText.textContent = "✗ Fehler";
+    alert("Etwas ist schiefgelaufen: " + err.message);
+    archivBtn.disabled = false;
+    archivBtn.textContent = "📦 Archivieren";
+  });
+});
+
+function ermittleArbeitsschritt() {
+  var ziel = document.getElementById("zielSelect").value;
+  if (ziel === "versicherung") {
+    var phase = document.getElementById("versicherungPhaseSelect").value;
+    if (phase === "Sonstige") {
+      var frei = document.getElementById("versicherungPhaseFreitext").value.trim();
+      phase = frei || "Sonstige";
+    }
+    return "Versicherung - " + phase;
+  }
+  return document.getElementById("arbeitsschrittSelect").value;
+}
+
+function updateUploadStatus() {
+  var ziel = document.getElementById("zielSelect").value;
+  var projekt = document.getElementById("projektSelect").value;
+  var schritt = ermittleArbeitsschritt();
+  var skipKi = (ziel === "versicherung") || document.getElementById("skipTriageCheckbox").checked;
 
   uploadStatus.innerHTML = selectedFiles.length + " Datei(en) ausgewählt.";
-  document.getElementById("triageBtn").textContent = "KI-Triage starten";
+  triageBtn.textContent = skipKi ? "Hochladen & manuell auswählen" : "KI-Triage starten";
 
   var progressContainer = document.getElementById("progressBarContainer");
   var progressFill = document.getElementById("progressBarFill");
@@ -649,25 +885,61 @@ function updateUploadStatus() {
   } else {
     triageBtn.disabled = true;
     if (selectedFiles.length > 0 && (!projekt || !schritt)) {
-      uploadStatus.innerHTML += " <strong>Bitte zuerst Projekt und Arbeitsschritt wählen.</strong>";
+      uploadStatus.innerHTML += " <strong>Bitte zuerst Projekt (und Phase/Arbeitsschritt) wählen.</strong>";
     }
   }
 }
 
-document.getElementById("projektSelect").addEventListener("change", updateUploadStatus);
+// Schaltet Eingabefelder/Bereiche je nach gewähltem Ziel um
+function toggleZielUI() {
+  var ziel = document.getElementById("zielSelect").value;
+
+  document.getElementById("arbeitsschrittRow").classList.toggle("hidden", ziel !== "doku");
+  document.getElementById("versicherungPhaseRow").classList.toggle("hidden", ziel !== "versicherung");
+  document.getElementById("archivBezeichnungRow").classList.toggle("hidden", ziel !== "archiv");
+  document.getElementById("skipTriageRow").classList.toggle("hidden", ziel !== "doku");
+
+  document.getElementById("uploadCard").classList.toggle("hidden", ziel === "archiv");
+  document.getElementById("archivUploadCard").classList.toggle("hidden", ziel !== "archiv");
+  document.getElementById("resultCard").classList.add("hidden");
+
+  if (ziel === "versicherung") {
+    document.getElementById("skipTriageCheckbox").checked = true;
+  }
+  updateUploadStatus();
+  updateArchivStatus();
+}
+
+document.getElementById("zielSelect").addEventListener("change", toggleZielUI);
+document.getElementById("versicherungPhaseSelect").addEventListener("change", function() {
+  document.getElementById("versicherungPhaseFreitext").style.display = (this.value === "Sonstige") ? "block" : "none";
+  updateUploadStatus();
+});
+document.getElementById("versicherungPhaseFreitext").addEventListener("input", updateUploadStatus);
+document.getElementById("archivBezeichnung").addEventListener("input", updateArchivStatus);
+
+document.getElementById("projektSelect").addEventListener("change", function() {
+  updateUploadStatus();
+  updateArchivStatus();
+});
 document.getElementById("arbeitsschrittSelect").addEventListener("change", updateUploadStatus);
+document.getElementById("skipTriageCheckbox").addEventListener("change", function() {
+  triageBtn.textContent = this.checked ? "Hochladen & manuell auswählen" : "KI-Triage starten";
+});
 
 // ============================================================
-// KI-Triage starten (inkl. Batch anlegen, Rohfoto-Upload nach Storage)
+// Hochladen starten (Doku / Versicherung) – mit oder ohne KI-Triage
 // ============================================================
 triageBtn.addEventListener("click", function() {
   triageBtn.disabled = true;
   triageBtn.textContent = "Lade Rohfotos hoch...";
 
+  var ziel = document.getElementById("zielSelect").value;
   var projektSelect = document.getElementById("projektSelect");
   var projektId = projektSelect.value;
   var projektName = projektSelect.options[projektSelect.selectedIndex].textContent;
-  var arbeitsschritt = document.getElementById("arbeitsschrittSelect").value;
+  var arbeitsschritt = ermittleArbeitsschritt();
+  var skipKi = (ziel === "versicherung") || document.getElementById("skipTriageCheckbox").checked;
   currentProjectId = projektId;
 
   // Lokale Vorschau-URLs + IDs vorbereiten
@@ -685,7 +957,9 @@ triageBtn.addEventListener("click", function() {
       perspektive: null,
       vorschlag: false,
       duplikat_von: null,
-      selected: false
+      // Im manuellen Modus (Versicherung / Checkbox) starten alle Fotos als
+      // "ausgewählt" – der Nutzer nimmt gezielt das raus, was nicht gebraucht wird.
+      selected: skipKi
     });
   }
 
@@ -695,60 +969,73 @@ triageBtn.addEventListener("click", function() {
       return ladeRohfotosHoch(currentBatchId);
     })
     .then(function() {
-      triageBtn.textContent = "KI analysiert...";
-      return alleAlsBase64(photoResults);
-    })
-    .then(function(fotosPayload) {
-      var progressFill = document.getElementById("progressBarFill");
-      var progressText = document.getElementById("progressText");
-      progressFill.classList.add("indeterminate");
-      progressText.classList.remove("success");
-      progressText.textContent = "KI analysiert " + fotosPayload.length + " Fotos...";
-
-      return fetch(SUPABASE_URL + "/functions/v1/foto-triage-score", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": "Bearer " + SUPABASE_ANON_KEY
-        },
-        body: JSON.stringify({
-          arbeitsschritt: arbeitsschritt,
-          fotos: fotosPayload
-        })
-      });
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-      var progressFill = document.getElementById("progressBarFill");
-      var progressText = document.getElementById("progressText");
-      progressFill.classList.remove("indeterminate");
-
-      if (data.error) {
-        progressFill.style.width = "0%";
-        progressText.textContent = "✗ KI-Triage fehlgeschlagen";
-        alert("KI-Triage fehlgeschlagen: " + data.error);
-        triageBtn.disabled = false;
-        triageBtn.textContent = "KI-Triage starten";
-        return Promise.reject(new Error("triage-error"));
+      if (skipKi) {
+        // Manueller Modus: KI komplett überspringen, direkt zur Auswahl
+        return fetch(SUPABASE_URL + "/rest/v1/foto_triage_batches?id=eq." + currentBatchId, {
+          method: "PATCH",
+          headers: {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ status: "manuell", updated_at: new Date().toISOString() })
+        });
       }
-      progressFill.style.width = "100%";
-      progressText.textContent = "✓ KI-Analyse abgeschlossen";
-      progressText.classList.add("success");
-      anwendenScores(data.scores);
-      return speichereScoresInDB();
+
+      triageBtn.textContent = "KI analysiert...";
+      return alleAlsBase64(photoResults)
+        .then(function(fotosPayload) {
+          var progressFill = document.getElementById("progressBarFill");
+          var progressText = document.getElementById("progressText");
+          progressFill.classList.add("indeterminate");
+          progressText.classList.remove("success");
+          progressText.textContent = "KI analysiert " + fotosPayload.length + " Fotos...";
+
+          return fetch(SUPABASE_URL + "/functions/v1/foto-triage-score", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_ANON_KEY,
+              "Authorization": "Bearer " + SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+              arbeitsschritt: arbeitsschritt,
+              fotos: fotosPayload
+            })
+          });
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          var progressFill = document.getElementById("progressBarFill");
+          var progressText = document.getElementById("progressText");
+          progressFill.classList.remove("indeterminate");
+
+          if (data.error) {
+            progressFill.style.width = "0%";
+            progressText.textContent = "✗ KI-Triage fehlgeschlagen";
+            alert("KI-Triage fehlgeschlagen: " + data.error);
+            triageBtn.disabled = false;
+            triageBtn.textContent = "KI-Triage starten";
+            return Promise.reject(new Error("triage-error"));
+          }
+          progressFill.style.width = "100%";
+          progressText.textContent = "✓ KI-Analyse abgeschlossen";
+          progressText.classList.add("success");
+          anwendenScores(data.scores);
+          return speichereScoresInDB();
+        });
     })
     .then(function() {
       triageBtn.disabled = false;
-      triageBtn.textContent = "KI-Triage starten";
+      triageBtn.textContent = skipKi ? "Hochladen & manuell auswählen" : "KI-Triage starten";
       zeigeErgebnis();
     })
     .catch(function(err) {
       if (err && err.message === "triage-error") return; // bereits behandelt
-      console.error("Fehler bei KI-Triage:", err);
+      console.error("Fehler beim Hochladen:", err);
       alert("Etwas ist schiefgelaufen: " + err.message + "\nBitte erneut versuchen.");
       triageBtn.disabled = false;
-      triageBtn.textContent = "KI-Triage starten";
+      triageBtn.textContent = skipKi ? "Hochladen & manuell auswählen" : "KI-Triage starten";
     });
 });
 
@@ -1124,7 +1411,9 @@ function erstelleUndLadeZipHoch(batchId, abgelehnteFotos) {
 }
 
 // Erzeugt eine zeitlich befristete Download-URL fürs Archiv und zeigt sie an
-function zeigeArchivDownloadLink(zipPath) {
+function zeigeArchivDownloadLink(zipPath, linkId, containerId) {
+  linkId = linkId || "archivDownloadLink";
+  containerId = containerId || "archivLinkContainer";
   return fetch(SUPABASE_URL + "/storage/v1/object/sign/foto-triage-archiv/" + zipPath, {
     method: "POST",
     headers: {
@@ -1137,9 +1426,9 @@ function zeigeArchivDownloadLink(zipPath) {
   .then(function(res) { return res.json(); })
   .then(function(data) {
     if (data && data.signedURL) {
-      var link = document.getElementById("archivDownloadLink");
+      var link = document.getElementById(linkId);
       link.href = SUPABASE_URL + "/storage/v1" + data.signedURL;
-      document.getElementById("archivLinkContainer").classList.remove("hidden");
+      document.getElementById(containerId).classList.remove("hidden");
     }
   })
   .catch(function(err) {
@@ -1395,6 +1684,7 @@ document.getElementById("resetBtn").addEventListener("click", function() {
 // ============================================================
 ladeProjekte();
 ladeArbeitsschritte();
+toggleZielUI();
 
 </script>
 </body>
